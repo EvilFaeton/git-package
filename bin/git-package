@@ -16,9 +16,18 @@ const [
   _script,
   versionComponent = 'minor'
 ] = process.argv
-const nextVersion = semver.inc(pkg.version, versionComponent)
 const isPrerelease = /^pre/.test(versionComponent)
+let nextVersion = semver.inc(pkg.version, isPrerelease ? 'prerelease' : versionComponent)
 const releaseBranch = config.branch || 'master'
+
+if (isPrerelease) {
+  let versionToCheck = nextVersion.slice(0, -2);
+  let availableVersions = shell.exec(`git branch -r | grep ${versionToCheck}-`, { silent: true }).chomp();
+  if (availableVersions != "") {
+    availableVersions = availableVersions.split("\n").map(v => v.split('/v')[1]).sort((a,b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+    nextVersion = semver.inc(availableVersions[0], 'prerelease');
+  }  
+}
 
 const checkBranch = _ => {
   const currentBranch = shell.exec(`git rev-parse --abbrev-ref HEAD`, { silent: true }).chomp()
@@ -50,8 +59,27 @@ const bump = _ => {
   )
 }
 
+const revert = _ => {
+  if (isPrerelease) {
+    fs.writeFileSync(
+      pkgPath,
+      JSON.stringify(
+        Object.assign(
+          {},
+          pkg,
+          { version: pkg.version }
+        ),
+        null,
+        2
+      )
+    )
+  }
+}
+
 const commit = _ => {
-  shell.exec(`git commit --all --no-verify --message 'Version ${nextVersion}'`)
+  if (!isPrerelease) {
+    shell.exec(`git commit --all --no-verify --message 'Version ${nextVersion}'`)
+  }
   shell.exec(`git checkout -b release/v${nextVersion}`)
 
   if (config.includeIgnored) {
@@ -71,3 +99,4 @@ checkBranch()
 build()
 bump()
 commit()
+revert()
